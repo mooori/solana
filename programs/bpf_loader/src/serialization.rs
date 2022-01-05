@@ -13,6 +13,42 @@ use {
     std::{io::prelude::*, mem::size_of},
 };
 
+/// Caches information about duplicate instruction accounts. Used to avoid
+/// repeatedly re-calculating duplicates.
+#[derive(Debug, PartialEq)]
+struct DuplicateInstructionAccounts {
+    /// First index of an instruction account.
+    first_index: usize,
+    /// Internal cache, use `is_duplicate` to query for duplicates.
+    duplicate_positions: Vec<Option<usize>>,
+}
+
+impl DuplicateInstructionAccounts {
+    fn new(instruction_context: &InstructionContext) -> Self {
+        // Instruction accounts start after program accounts.
+        let first_index = instruction_context.get_number_of_program_accounts();
+
+        // For every instruction account, check if it is a duplicate.
+        let num_accounts = instruction_context.get_number_of_accounts();
+        let mut duplicate_positions = Vec::with_capacity(num_accounts - first_index);
+        for index_in_instruction in first_index..num_accounts {
+            duplicate_positions.push(is_duplicate(instruction_context, index_in_instruction));
+        }
+
+        Self {
+            first_index,
+            duplicate_positions,
+        }
+    }
+
+    /// Returns `Some(position)` if `index_in_instruction` is a duplicate
+    /// account. `position` is the index of the account's first occurrence in
+    /// the instruction.
+    fn is_duplicate(&self, index_in_instruction: usize) -> Option<usize> {
+        self.duplicate_positions[index_in_instruction - self.first_index]
+    }
+}
+
 /// Look for a duplicate account and return its position if found
 pub fn is_duplicate(
     instruction_context: &InstructionContext,
@@ -375,6 +411,107 @@ mod tests {
             slice::{from_raw_parts, from_raw_parts_mut},
         },
     };
+
+    #[test]
+    fn test_duplicate_instruction_accounts() {
+        // Constructing `instruction_context` is elaborate and the interface of
+        // `DuplicateInstructionAccounts` is small. Hence, a single test
+        // function.
+
+        // construct instruction_context
+        let program_id = solana_sdk::pubkey::new_rand();
+        let transaction_accounts = vec![
+            (
+                program_id,
+                AccountSharedData::from(Account {
+                    lamports: 0,
+                    data: vec![],
+                    owner: bpf_loader::id(),
+                    executable: true,
+                    rent_epoch: 0,
+                }),
+            ),
+            (
+                solana_sdk::pubkey::new_rand(),
+                AccountSharedData::from(Account {
+                    lamports: 1,
+                    data: vec![1u8, 2, 3, 4, 5],
+                    owner: bpf_loader::id(),
+                    executable: false,
+                    rent_epoch: 100,
+                }),
+            ),
+            (
+                solana_sdk::pubkey::new_rand(),
+                AccountSharedData::from(Account {
+                    lamports: 2,
+                    data: vec![11u8, 12, 13, 14, 15, 16, 17, 18, 19],
+                    owner: bpf_loader::id(),
+                    executable: true,
+                    rent_epoch: 200,
+                }),
+            ),
+            (
+                solana_sdk::pubkey::new_rand(),
+                AccountSharedData::from(Account {
+                    lamports: 3,
+                    data: vec![],
+                    owner: bpf_loader::id(),
+                    executable: false,
+                    rent_epoch: 3100,
+                }),
+            ),
+        ];
+        let instruction_accounts = [1, 2, 2, 3, 3, 2]
+            .into_iter()
+            .enumerate()
+            .map(|(index_in_instruction, index_in_transaction)| AccountMeta {
+                pubkey: transaction_accounts[index_in_transaction].0,
+                is_signer: false,
+                is_writable: index_in_instruction >= 3,
+            })
+            .collect();
+        let instruction_data = vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+        let program_indices = [0];
+        let preparation = prepare_mock_invoke_context(
+            transaction_accounts,
+            instruction_accounts,
+            &program_indices,
+        );
+        let mut transaction_context = TransactionContext::new(preparation.transaction_accounts, 1);
+        let mut invoke_context = InvokeContext::new_mock(&mut transaction_context, &[]);
+        invoke_context
+            .push(
+                &preparation.instruction_accounts,
+                &program_indices,
+                &instruction_data,
+            )
+            .unwrap();
+        let instruction_context = invoke_context
+            .transaction_context
+            .get_current_instruction_context()
+            .unwrap();
+
+        // check constructor
+        let duplicates = DuplicateInstructionAccounts::new(instruction_context);
+        let want_duplicates = DuplicateInstructionAccounts {
+            first_index: 1,
+            duplicate_positions: vec![None, None, Some(1), None, Some(3), Some(1)],
+        };
+        assert_eq!(want_duplicates, duplicates);
+
+        // check is_duplicate
+        for (position, _) in preparation.instruction_accounts.iter().enumerate() {
+            let index_in_instruction =
+                instruction_context.get_number_of_program_accounts() + position;
+            assert_eq!(
+                want_duplicates.duplicate_positions[position],
+                duplicates.is_duplicate(index_in_instruction),
+                "is_duplicate({}) returns unexpected value",
+                index_in_instruction,
+            )
+        }
+    }
 
     #[test]
     fn test_serialize_parameters() {
