@@ -124,10 +124,11 @@ pub fn serialize_parameters_unaligned(
 ) -> Result<AlignedMemory, InstructionError> {
     // Calculate size in order to alloc once
     let mut size = size_of::<u64>();
+    let duplicates = DuplicateInstructionAccounts::new(instruction_context);
     for index_in_instruction in instruction_context.get_number_of_program_accounts()
         ..instruction_context.get_number_of_accounts()
     {
-        let duplicate = is_duplicate(instruction_context, index_in_instruction);
+        let duplicate = duplicates.is_duplicate(index_in_instruction);
         size += 1; // dup
         if duplicate.is_none() {
             let data_len = instruction_context
@@ -155,7 +156,7 @@ pub fn serialize_parameters_unaligned(
     for index_in_instruction in instruction_context.get_number_of_program_accounts()
         ..instruction_context.get_number_of_accounts()
     {
-        let duplicate = is_duplicate(instruction_context, index_in_instruction);
+        let duplicate = duplicates.is_duplicate(index_in_instruction);
         if let Some(position) = duplicate {
             v.write_u8(position as u8)
                 .map_err(|_| InstructionError::InvalidArgument)?;
@@ -236,10 +237,11 @@ pub fn serialize_parameters_aligned(
 ) -> Result<AlignedMemory, InstructionError> {
     // Calculate size in order to alloc once
     let mut size = size_of::<u64>();
+    let duplicates = DuplicateInstructionAccounts::new(instruction_context);
     for index_in_instruction in instruction_context.get_number_of_program_accounts()
         ..instruction_context.get_number_of_accounts()
     {
-        let duplicate = is_duplicate(instruction_context, index_in_instruction);
+        let duplicate = duplicates.is_duplicate(index_in_instruction);
         size += 1; // dup
         if duplicate.is_some() {
             size += 7; // padding to 64-bit aligned
@@ -273,7 +275,7 @@ pub fn serialize_parameters_aligned(
     for index_in_instruction in instruction_context.get_number_of_program_accounts()
         ..instruction_context.get_number_of_accounts()
     {
-        let duplicate = is_duplicate(instruction_context, index_in_instruction);
+        let duplicate = duplicates.is_duplicate(index_in_instruction);
         if let Some(position) = duplicate {
             v.write_u8(position as u8)
                 .map_err(|_| InstructionError::InvalidArgument)?;
