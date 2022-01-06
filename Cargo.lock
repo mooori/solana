@@ -5134,6 +5134,7 @@ dependencies = [
  "solana-measure",
  "solana-metrics",
  "solana-perf",
+ "solana-program-runtime",
  "solana-rayon-threadlimit",
  "solana-runtime",
  "solana-sdk",
@@ -5487,6 +5488,7 @@ dependencies = [
  "rustc_version 0.4.0",
  "serde",
  "solana-logger 1.10.0",
+ "solana-measure",
  "solana-sdk",
  "thiserror",
 ]
